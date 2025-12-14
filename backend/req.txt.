@@ -1,0 +1,23 @@
+venv (Virtual Environment):
+
+Ini seperti "Ruang Bengkel Pribadi".
+
+Di Fedora bos kan banyak program lain. Biar obeng dan kunci pas project ini gak ketuker atau ngerusak mesin program lain, kita bikin bengkel khusus. Kalau bengkel ini berantakan, tinggal hapus satu folder, sistem Fedora bos tetap aman.
+
+FastAPI:
+
+Ini "Pelayannya" (Waiter).
+
+Tugasnya menerima pesanan dari Frontend (React), meneruskannya ke dapur (Python), dan mengantar makanannya balik ke Frontend. Dia cepat dan modern.
+
+Uvicorn:
+
+Ini "Kompor/Mesinnya".
+
+FastAPI itu cuma kode diam. Biar dia bisa "hidup", melayani request, dan jalan terus di alamat localhost, dia butuh Uvicorn sebagai server yang menjalankannya.
+
+OR-Tools:
+
+Ini "Koki Jenius".
+
+Dia yang punya otak matematika. FastAPI cuma terima data "si A mau libur", lalu dikasih ke OR-Tools. OR-Tools yang mikir keras ngitung jadwalnya, lalu hasilnya dikasih balik ke FastAPI.
