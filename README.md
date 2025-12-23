@@ -1,9 +1,3 @@
-Siap bos. Ini adalah file **README.md** yang lengkap dan disesuaikan khusus untuk lingkungan **Fedora Linux** bos.
-
-Dokumentasi ini mencakup cara install Python 3.12 (agar `ortools` jalan), setup backend, hingga frontend. Silakan buat file bernama `README.md` di folder utama proyek, lalu copy-paste isinya.
-
----
-
 # Sistem Penjadwalan Perawat Otomatis (Nurse Scheduling System)
 
 Aplikasi web untuk membuat jadwal dinas perawat secara otomatis menggunakan algoritma **Constraint Programming (Google OR-Tools)**. Dibuat khusus untuk menyesuaikan pola rolling shift (Pagi-Siang-Malam-Libur) serta aturan shift Kepala Ruang & Ketua Tim.
