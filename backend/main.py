@@ -2,92 +2,135 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from ortools.sat.python import cp_model
 from fastapi.middleware.cors import CORSMiddleware
+import calendar
+from datetime import date
 
 app = FastAPI()
 
-# --- KONFIGURASI AGAR BISA DIAKSES REACT (CORS) ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Membolehkan semua akses (aman untuk development)
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- FORMAT DATA (Yang dikirim dari Frontend) ---
-class ShiftType(BaseModel):
+class Nurse(BaseModel):
     id: int
-    label: str  # Contoh: "Pagi", "Malam"
-    color: str
+    name: str
+    role: str 
 
 class RequestOff(BaseModel):
-    nurse_index: int
+    nurse_id: int
     day: int
-    shift_id: int # ID 0 biasanya untuk Libur
+    shift_id: int 
+
+class ShiftTargets(BaseModel):
+    morning: int
+    afternoon: int
+    night: int
 
 class ScheduleRequest(BaseModel):
-    num_nurses: int
-    num_days: int
-    shift_types: list[ShiftType]
+    month: int
+    year: int
+    nurses: list[Nurse]
     requests: list[RequestOff]
-    min_days_off: int 
+    targets: ShiftTargets
 
-# --- ENDPOINT UTAMA (API) ---
 @app.post("/generate-schedule")
 def generate_schedule(data: ScheduleRequest):
-    # 1. Inisialisasi Model Matematika
-    model = cp_model.CpModel()
-    shifts = {}
-
-    # 2. Membuat Variabel: Setiap (perawat, hari) punya satu nilai shift
-    for n in range(data.num_nurses):
-        for d in range(data.num_days):
-            # Domain: 0 sampai jumlah tipe shift - 1
-            shifts[(n, d)] = model.NewIntVar(0, len(data.shift_types) - 1, f'shift_n{n}_d{d}')
-
-    # 3. MENERAPKAN REQUEST (Hard Constraint)
-    # Jika ada request libur/tukar, paksa variabel bernilai sesuai request
-    for req in data.requests:
-        model.Add(shifts[(req.nurse_index, req.day)] == req.shift_id)
-
-    # 4. ATURAN JATAH LIBUR (Constraint)
-    # Asumsi: ID 0 adalah 'Libur'
-    off_shift_id = 0 
+    print(f"📥 Generating: {data.month}/{data.year} for {len(data.nurses)} Nurses")
     
-    for n in range(data.num_nurses):
-        is_off = []
-        for d in range(data.num_days):
-            # Logika Boolean: Apakah hari ini libur? (1=Ya, 0=Tidak)
-            b_var = model.NewBoolVar(f'is_off_n{n}_d{d}')
-            model.Add(shifts[(n, d)] == off_shift_id).OnlyEnforceIf(b_var)
-            model.Add(shifts[(n, d)] != off_shift_id).OnlyEnforceIf(b_var.Not())
-            is_off.append(b_var)
-        
-        # Jumlah hari libur >= minimal yang diminta
-        model.Add(sum(is_off) >= data.min_days_off)
+    _, num_days = calendar.monthrange(data.year, data.month)
+    days = list(range(1, num_days + 1))
+    
+    model = cp_model.CpModel()
+    shifts = {} 
 
-    # 5. ATURAN HARIAN (Minimal ada yang jaga)
-    # Kita skip shift ID 0 (Libur), sisanya (Pagi/Siang/Malam) harus ada yang isi
-    # Contoh sederhana: Setiap hari minimal 1 orang TIDAK LIBUR
-    for d in range(data.num_days):
-        model.Add(sum([shifts[(n, d)] != 0 for n in range(data.num_nurses)]) >= 1)
+    # Pola Rolling: P P S S M M L L
+    pattern_sequence = [1, 1, 2, 2, 3, 3, 0, 0] 
+    pattern_len = len(pattern_sequence)
 
-    # 6. MENCARI SOLUSI
+    nurse_offsets = {}
+    for nurse in data.nurses:
+        if nurse.role == "regular":
+            nurse_offsets[nurse.id] = model.NewIntVar(0, pattern_len - 1, f'offset_n{nurse.id}')
+
+    for nurse in data.nurses:
+        for d in days:
+            shifts[(nurse.id, d)] = model.NewIntVar(0, 4, f's_n{nurse.id}_d{d}')
+
+            # 1. HARD CONSTRAINT: REQUEST
+            req = next((r for r in data.requests if r.nurse_id == nurse.id and r.day == d), None)
+            if req:
+                model.Add(shifts[(nurse.id, d)] == req.shift_id)
+            else:
+                # 2. ROLE STATIC (Karu, Wakaru, Katim -> PAGI)
+                # Sesuai gambar: 3 Teratas (Kuning) masuk Pagi terus
+                if nurse.role in ["karu", "wakaru", "katim"]:
+                    curr_date = date(data.year, data.month, d)
+                    is_sunday = curr_date.weekday() == 6
+                    if is_sunday:
+                        model.Add(shifts[(nurse.id, d)] == 0) # Libur Minggu
+                    else:
+                        model.Add(shifts[(nurse.id, d)] == 1) # Pagi Senin-Sabtu
+                
+                # 3. ROLE REGULAR (Rolling)
+                else: 
+                    pattern_idx = model.NewIntVar(0, pattern_len - 1, f'pidx_n{nurse.id}_d{d}')
+                    model.AddModuloEquality(pattern_idx, nurse_offsets[nurse.id] + (d - 1), pattern_len)
+                    possible_shifts = [[i, val] for i, val in enumerate(pattern_sequence)]
+                    model.AddAllowedAssignments([pattern_idx, shifts[(nurse.id, d)]], possible_shifts)
+
+    # --- PENYEIMBANGAN TARGET ---
+    target_map = {
+        1: data.targets.morning,   
+        2: data.targets.afternoon, 
+        3: data.targets.night      
+    }
+
+    total_penalties = []
+
+    for d in days:
+        for s_type in [1, 2, 3]: 
+            workers = []
+            for nurse in data.nurses:
+                is_working = model.NewBoolVar(f'w_n{nurse.id}_d{d}_s{s_type}')
+                model.Add(shifts[(nurse.id, d)] == s_type).OnlyEnforceIf(is_working)
+                model.Add(shifts[(nurse.id, d)] != s_type).OnlyEnforceIf(is_working.Not())
+                workers.append(is_working)
+            
+            target = target_map[s_type]
+            
+            # Hitung selisih dari target
+            diff = model.NewIntVar(-20, 20, f'diff_d{d}_s{s_type}')
+            model.Add(diff == sum(workers) - target)
+            abs_diff = model.NewIntVar(0, 20, f'abs_diff_d{d}_s{s_type}')
+            model.AddAbsEquality(abs_diff, diff)
+            total_penalties.append(abs_diff)
+
+    model.Minimize(sum(total_penalties))
+
     solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = 5.0
     status = solver.Solve(model)
 
-    # 7. MENYUSUN HASIL UNTUK DIKIRIM BALIK
     if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
-        result_schedule = []
-        for n in range(data.num_nurses):
+        res_data = []
+        for nurse in data.nurses:
             nurse_schedule = []
-            for d in range(data.num_days):
-                s_val = solver.Value(shifts[(n, d)])
-                # Ambil info lengkap shift (label & warna) berdasarkan ID
-                shift_info = next((s for s in data.shift_types if s.id == s_val), None)
-                nurse_schedule.append(shift_info)
-            result_schedule.append({"nurse_id": n, "schedule": nurse_schedule})
-        
-        return {"status": "SUCCESS", "data": result_schedule}
+            for d in days:
+                val = solver.Value(shifts[(nurse.id, d)])
+                label, color, text_color = "L", "bg-white", "text-slate-400"
+                if val == 1: label, color, text_color = "P", "bg-white", "text-slate-800 font-bold"
+                elif val == 2: label, color, text_color = "S", "bg-green-200", "text-green-800 font-bold"
+                elif val == 3: label, color, text_color = "M", "bg-blue-200", "text-blue-800 font-bold"
+                elif val == 4: label, color, text_color = "C", "bg-yellow-300", "text-yellow-900 font-bold"
+
+                nurse_schedule.append({
+                    "day": d, "shift_id": val, "label": label, "bg_color": color, "text_color": text_color
+                })
+            res_data.append({"nurse": nurse, "schedule": nurse_schedule})
+        return {"status": "SUCCESS", "data": res_data, "days_count": num_days}
     else:
-        return {"status": "FAILED", "message": "Jadwal bentrok! Tidak ada solusi yang memenuhi semua aturan."}
+        return {"status": "FAILED", "message": "Gagal. Konflik terlalu berat."}

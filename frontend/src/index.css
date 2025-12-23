@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+/* RESET PENTING AGAR FULL SCREEN */
+body {
+  margin: 0;
+  padding: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background-color: #f8fafc; /* slate-50 */
+}
+
+/* HAPUS BATASAN BAWAAN VITE DI SINI */
+#root {
+  max-width: none !important; /* Paksa tidak ada batas lebar */
+  margin: 0 !important;
+  padding: 0 !important;
+  width: 100%;
+}
+
+/* Tambahkan di src/index.css paling bawah */
+@media print {
+  /* Sembunyikan Header, Input, dan Tombol */
+  body > div > div.sticky,
+  body > div > div.space-y-6 > div.grid,
+  body > div > div.space-y-6 > div.flex,
+  button {
+    display: none !important;
+  }
+
+  /* Pastikan Tabel terlihat jelas */
+  body {
+    background-color: white;
+    font-size: 10px; /* Kecilkan font biar muat kertas */
+  }
+
+  /* Atur container tabel biar full page */
+  .bg-white.rounded-xl.shadow-xl {
+    box-shadow: none !important;
+    border: none !important;
+    width: 100% !important;
+    overflow: visible !important;
+  }
+
+  table {
+    width: 100% !important;
+  }
+}
